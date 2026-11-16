@@ -12,7 +12,12 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.util.Locale
 
-data class Prayer(val name: String, val location: String?, val minutes: Int) {
+data class Prayer(
+    val name: String,
+    val location: String?,
+    val minutes: Int,
+    val note: String? = null,
+) {
     val timeText: String
         get() = String.format(Locale.US, "%02d:%02d", minutes / 60, minutes % 60)
 }
@@ -20,11 +25,16 @@ data class Prayer(val name: String, val location: String?, val minutes: Int) {
 data class DaySchedule(
     val date: String,
     val prayers: List<Prayer>,
+    /** When the website was last downloaded (0 = never). */
     val fetchedAt: Long,
-    /** true when the data is not from today (offline, couldn't refresh). */
+    /** true when the website data is not from today (offline, couldn't refresh). */
     val stale: Boolean = false,
     /** true when the last network attempt failed. */
     val failed: Boolean = false,
+    /** Sunrise in minutes after midnight, from the website. */
+    val sunrise: Int? = null,
+    /** true when a WhatsApp schedule was merged in. */
+    val hasWhatsApp: Boolean = false,
 )
 
 object PrayerRepository {
@@ -36,6 +46,9 @@ object PrayerRepository {
     private const val PREFS = "prayer_cache"
     private const val KEY = "schedule"
 
+    /** A prayer stays "next" until this many minutes after it starts. */
+    const val GRACE_MINUTES = 5
+
     fun today(): String = LocalDate.now(ZONE).toString()
 
     fun nowMinutes(): Int {
@@ -43,24 +56,77 @@ object PrayerRepository {
         return t.hour * 60 + t.minute
     }
 
-    /** A prayer stays "next" until this many minutes after it starts. */
-    const val GRACE_MINUTES = 5
-
     /** Index of the next prayer (not yet GRACE_MINUTES past its start), or -1 when today's are over. */
     fun nextIndex(prayers: List<Prayer>, now: Int = nowMinutes()): Int =
         prayers.indexOfFirst { it.minutes + GRACE_MINUTES > now }
 
     /**
-     * Returns today's schedule. Uses the cache when it is from today, otherwise downloads.
+     * Today's schedule: website + WhatsApp list, merged without duplicates.
      * Must be called off the main thread.
      */
     fun load(context: Context, forceRefresh: Boolean = false): DaySchedule? {
+        val site = loadSite(context, forceRefresh)
+        val siteToday = site?.takeIf { !it.stale }
+        val wa = WhatsAppSchedule.forToday(context, siteToday?.sunrise)
+
+        if (site == null) {
+            if (wa.isEmpty()) return null
+            return DaySchedule(today(), sorted(wa), 0L, failed = true, hasWhatsApp = true)
+        }
+        if (wa.isEmpty()) return site
+        // Stale website data is from another day: show today's WhatsApp list instead of mixing days.
+        val base = if (site.stale) emptyList() else site.prayers
+        return site.copy(prayers = merge(base, wa), hasWhatsApp = true)
+    }
+
+    // ---- merging ----
+
+    /** Adds WhatsApp minyanim to the website list; same prayer + time + place is shown once. */
+    fun merge(site: List<Prayer>, wa: List<Prayer>): List<Prayer> {
+        val result = site.toMutableList()
+        for (w in wa) {
+            val i = result.indexOfFirst { s ->
+                s.minutes == w.minutes &&
+                    category(s.name) == category(w.name) &&
+                    (s.location == null || w.location == null || sameLocation(s.location, w.location))
+            }
+            if (i >= 0) {
+                val s = result[i]
+                result[i] = s.copy(location = s.location ?: w.location, note = s.note ?: w.note)
+            } else {
+                result += w
+            }
+        }
+        return sorted(result)
+    }
+
+    private fun sorted(list: List<Prayer>) =
+        list.sortedWith(compareBy<Prayer>({ it.minutes }, { it.location ?: "" }))
+
+    private fun category(name: String): Int = when {
+        name.contains("מנחה") -> 1
+        name.contains("ערבית") || name.contains("מעריב") -> 2
+        else -> 0 // שחרית / הודו / קרבנות
+    }
+
+    /** "בית המדרש" == "בית מדרש", "אודיטוריום" == "באודיטוריום". */
+    private fun sameLocation(a: String, b: String): Boolean = normLocation(a) == normLocation(b)
+
+    private fun normLocation(s: String): String =
+        s.split(Regex("[\\s,]+")).filter { it.isNotEmpty() }.joinToString("") { w ->
+            if (w.length > 2 && (w.startsWith("ה") || w.startsWith("ב"))) w.substring(1) else w
+        }
+
+    // ---- website ----
+
+    private fun loadSite(context: Context, forceRefresh: Boolean): DaySchedule? {
         val cached = readCache(context)
         if (!forceRefresh && cached != null && cached.date == today() && cached.prayers.isNotEmpty()) {
             return cached
         }
         return try {
-            val schedule = DaySchedule(today(), fetch(), System.currentTimeMillis())
+            val (prayers, sunrise) = fetch()
+            val schedule = DaySchedule(today(), prayers, System.currentTimeMillis(), sunrise = sunrise)
             writeCache(context, schedule)
             schedule
         } catch (e: Exception) {
@@ -68,7 +134,7 @@ object PrayerRepository {
         }
     }
 
-    private fun fetch(): List<Prayer> {
+    private fun fetch(): Pair<List<Prayer>, Int?> {
         val conn = URL(PAGE_URL).openConnection() as HttpURLConnection
         conn.connectTimeout = 8000
         conn.readTimeout = 8000
@@ -78,7 +144,7 @@ object PrayerRepository {
             val html = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             val prayers = parse(html)
             if (prayers.isEmpty()) throw IOException("No prayers found on page")
-            return prayers
+            return prayers to parseSunrise(html)
         } finally {
             conn.disconnect()
         }
@@ -110,6 +176,13 @@ object PrayerRepository {
         }.toList().sortedBy { it.minutes }
     }
 
+    /** "זריחה" in the day-times box, e.g. <dt>זריחה</dt><dd>06:07</dd>. */
+    private fun parseSunrise(html: String): Int? {
+        val m = Regex("זריחה(?:(?!</dl>).){0,200}?(\\d{1,2}):(\\d{2})", RegexOption.DOT_MATCHES_ALL)
+            .find(html) ?: return null
+        return m.groupValues[1].toInt() * 60 + m.groupValues[2].toInt()
+    }
+
     /** "מנחה - בבית המדרש" -> name "מנחה", location "בית המדרש". "שחרית - קרבנות" stays as is. */
     private fun splitName(text: String, minutes: Int): Prayer {
         val idx = text.indexOf(" - ")
@@ -134,6 +207,7 @@ object PrayerRepository {
             .put("date", s.date)
             .put("fetchedAt", s.fetchedAt)
             .put("prayers", arr)
+        if (s.sunrise != null) json.put("sunrise", s.sunrise)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, json.toString()).apply()
     }
@@ -148,7 +222,10 @@ object PrayerRepository {
                 val o = arr.getJSONObject(i)
                 Prayer(o.getString("n"), if (o.has("l")) o.getString("l") else null, o.getInt("m"))
             }
-            DaySchedule(json.getString("date"), list, json.getLong("fetchedAt"))
+            DaySchedule(
+                json.getString("date"), list, json.getLong("fetchedAt"),
+                sunrise = if (json.has("sunrise")) json.getInt("sunrise") else null,
+            )
         } catch (e: Exception) {
             null
         }

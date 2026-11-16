@@ -56,6 +56,19 @@
             android:text="פתח באתר" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/btn_paste"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📋 הדבק לוח מניינים מוואטסאפ" />
+
+    <TextView
+        android:id="@+id/wa_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"

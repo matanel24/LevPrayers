@@ -1,6 +1,7 @@
 package com.saltsman.levprayers
 
 import android.app.Activity
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -19,6 +20,7 @@ class MainActivity : Activity() {
 
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
+    private lateinit var waStatus: TextView
     private lateinit var dateView: TextView
     private val hebrew: Locale = Locale.forLanguageTag("he")
 
@@ -27,12 +29,29 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         list = findViewById(R.id.list)
         status = findViewById(R.id.status)
+        waStatus = findViewById(R.id.wa_status)
         dateView = findViewById(R.id.date)
 
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { load(force = true) }
         findViewById<Button>(R.id.btn_site).setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PrayerRepository.PAGE_URL)))
         }
+        val paste = findViewById<Button>(R.id.btn_paste)
+        paste.setOnClickListener { pasteFromClipboard() }
+        paste.setOnLongClickListener {
+            WhatsAppSchedule.clear(applicationContext)
+            Toast.makeText(this, "לוח הוואטסאפ נמחק, מוצגים רק זמני האתר", Toast.LENGTH_SHORT).show()
+            load(force = false)
+            true
+        }
+
+        handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShare(intent)
     }
 
     override fun onResume() {
@@ -41,6 +60,39 @@ class MainActivity : Activity() {
             .format(DateTimeFormatter.ofPattern("EEEE, d 'ב'MMMM", hebrew))
         load(force = false)
     }
+
+    // ---- WhatsApp schedule input ----
+
+    private fun handleShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        intent.action = null // don't import again later
+        importWhatsApp(text)
+    }
+
+    private fun pasteFromClipboard() {
+        val cm = getSystemService(ClipboardManager::class.java)
+        val clip = cm?.primaryClip
+        val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(this)?.toString() else null
+        if (text.isNullOrBlank()) {
+            Toast.makeText(this, "הלוח ריק. העתק קודם את ההודעה בוואטסאפ (לחיצה ארוכה ← העתק)", Toast.LENGTH_LONG).show()
+            return
+        }
+        importWhatsApp(text)
+    }
+
+    private fun importWhatsApp(text: String) {
+        val entries = WhatsAppSchedule.parse(text)
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "לא מצאתי מניינים בטקסט. ודא שהעתקת את הודעת \"זמני המניינים\"", Toast.LENGTH_LONG).show()
+            return
+        }
+        WhatsAppSchedule.save(applicationContext, text)
+        Toast.makeText(this, "נשמרו ${entries.size} מניינים מוואטסאפ ✓", Toast.LENGTH_SHORT).show()
+        load(force = false)
+    }
+
+    // ---- loading & rendering ----
 
     private fun load(force: Boolean) {
         status.text = "טוען…"
@@ -58,6 +110,15 @@ class MainActivity : Activity() {
     }
 
     private fun render(schedule: DaySchedule?, force: Boolean) {
+        val waSaved = WhatsAppSchedule.savedAt(this)
+        waStatus.text = if (waSaved > 0) {
+            val d = DateTimeFormatter.ofPattern("d/M")
+                .format(Instant.ofEpochMilli(waSaved).atZone(PrayerRepository.ZONE))
+            "לוח וואטסאפ נשמר ב-$d · לחיצה ארוכה על הכפתור מוחקת אותו"
+        } else {
+            "עוד לא הודבק לוח מוואטסאפ"
+        }
+
         list.removeAllViews()
         if (schedule == null || schedule.prayers.isEmpty()) {
             status.text = "לא הצלחתי לטעון את הזמנים. בדוק חיבור לאינטרנט ולחץ רענון."
@@ -67,12 +128,15 @@ class MainActivity : Activity() {
             Toast.makeText(this, "הרענון נכשל, מוצגים הזמנים השמורים", Toast.LENGTH_SHORT).show()
         }
 
-        val updated = DateTimeFormatter.ofPattern("HH:mm")
-            .format(Instant.ofEpochMilli(schedule.fetchedAt).atZone(PrayerRepository.ZONE))
-        status.text = if (schedule.stale) {
-            "⚠ הזמנים לא מהיום (עודכנו לאחרונה ${schedule.date} $updated)"
-        } else {
-            "עודכן היום ב-$updated"
+        status.text = when {
+            schedule.fetchedAt == 0L -> "⚠ אין חיבור לאתר, מוצג רק לוח הוואטסאפ"
+            schedule.stale && schedule.hasWhatsApp -> "⚠ זמני האתר לא מהיום, מוצג רק לוח הוואטסאפ"
+            schedule.stale -> "⚠ הזמנים לא מהיום (אין חיבור לאתר)"
+            else -> {
+                val updated = DateTimeFormatter.ofPattern("HH:mm")
+                    .format(Instant.ofEpochMilli(schedule.fetchedAt).atZone(PrayerRepository.ZONE))
+                "האתר עודכן היום ב-$updated" + if (schedule.hasWhatsApp) " · כולל מניינים מוואטסאפ" else ""
+            }
         }
 
         val now = PrayerRepository.nowMinutes()
@@ -84,8 +148,9 @@ class MainActivity : Activity() {
             row.findViewById<TextView>(R.id.i_time).text = p.timeText
             row.findViewById<TextView>(R.id.i_name).text = p.name
             val loc = row.findViewById<TextView>(R.id.i_location)
-            if (p.location != null) {
-                loc.text = "📍 ${p.location}"
+            val details = listOfNotNull(p.location?.let { "📍 $it" }, p.note).joinToString(" · ")
+            if (details.isNotEmpty()) {
+                loc.text = details
                 loc.visibility = View.VISIBLE
             } else {
                 loc.visibility = View.GONE
@@ -97,7 +162,7 @@ class MainActivity : Activity() {
                     tag.text = "הבאה"
                     tag.visibility = View.VISIBLE
                 }
-                p.minutes < now -> row.alpha = 0.45f
+                p.minutes + PrayerRepository.GRACE_MINUTES <= now -> row.alpha = 0.45f
             }
             list.addView(row)
         }
