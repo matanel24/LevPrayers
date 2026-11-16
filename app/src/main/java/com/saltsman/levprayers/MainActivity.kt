@@ -57,7 +57,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         dateView.text = LocalDate.now(PrayerRepository.ZONE)
-            .format(DateTimeFormatter.ofPattern("EEEE, d 'ב'MMMM", hebrew))
+            .format(DateTimeFormatter.ofPattern("EEEE, d 'ב'MMMM", hebrew)) +
+            (try { " · " + HebrewDate.full() } catch (e: Exception) { "" })
         load(force = false)
     }
 

@@ -102,6 +102,12 @@ class PrayerWidget : AppWidgetProvider() {
             )
             v.setOnClickPendingIntent(R.id.widget_root, open)
 
+            try {
+                v.setTextViewText(R.id.w_date, if (compact) HebrewDate.dayMonth() else HebrewDate.short())
+            } catch (e: Exception) {
+                v.setViewVisibility(R.id.w_date, View.GONE)
+            }
+
             val prayers = schedule?.prayers.orEmpty()
             if (prayers.isEmpty()) {
                 v.setTextViewText(R.id.w_name, if (compact) "לב" else "אין נתונים")
