@@ -65,6 +65,10 @@ object PrayerRepository {
      * Must be called off the main thread.
      */
     fun load(context: Context, forceRefresh: Boolean = false): DaySchedule? {
+        try {
+            WhatsAppSchedule.syncShared(context, forceRefresh)
+        } catch (e: Exception) {
+        }
         val site = loadSite(context, forceRefresh)
         val siteToday = site?.takeIf { !it.stale }
         val wa = WhatsAppSchedule.forToday(context, siteToday?.sunrise)

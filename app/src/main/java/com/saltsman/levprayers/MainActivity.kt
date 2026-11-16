@@ -40,8 +40,8 @@ class MainActivity : Activity() {
         paste.setOnClickListener { pasteFromClipboard() }
         paste.setOnLongClickListener {
             WhatsAppSchedule.clear(applicationContext)
-            Toast.makeText(this, "לוח הוואטסאפ נמחק, מוצגים רק זמני האתר", Toast.LENGTH_SHORT).show()
-            load(force = false)
+            Toast.makeText(this, "הלוח שהדבקת נמחק, טוען את הלוח המשותף", Toast.LENGTH_SHORT).show()
+            load(force = true)
             true
         }
 
@@ -115,9 +115,10 @@ class MainActivity : Activity() {
         waStatus.text = if (waSaved > 0) {
             val d = DateTimeFormatter.ofPattern("d/M")
                 .format(Instant.ofEpochMilli(waSaved).atZone(PrayerRepository.ZONE))
-            "לוח וואטסאפ נשמר ב-$d · לחיצה ארוכה על הכפתור מוחקת אותו"
+            if (WhatsAppSchedule.isShared(this)) "לוח מניינים משותף · עודכן ב-$d"
+            else "לוח מניינים שהדבקת ב-$d · לחיצה ארוכה מחזירה ללוח המשותף"
         } else {
-            "עוד לא הודבק לוח מוואטסאפ"
+            "אין לוח מניינים מוואטסאפ"
         }
 
         list.removeAllViews()

@@ -43,19 +43,70 @@ object WhatsAppSchedule {
 
     // ---- storage ----
 
+    /**
+     * Shared schedule everyone gets. Edit this file in the GitHub repo to update all phones:
+     * https://github.com/matanel24/LevPrayers/edit/main/schedule/whatsapp.txt
+     */
+    const val SHARED_URL =
+        "https://raw.githubusercontent.com/matanel24/LevPrayers/main/schedule/whatsapp.txt"
+
+    private const val KEY_SOURCE = "source"            // "shared" | "local"
+    private const val KEY_LAST_SHARED = "last_shared"  // last shared text seen
+    private const val KEY_SHARED_CHECKED = "shared_checked_at"
+    private const val SHARED_CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000L
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** A schedule pasted on this phone. */
     fun save(context: Context, text: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        prefs(context).edit()
             .putString(KEY_TEXT, text)
             .putLong(KEY_SAVED_AT, System.currentTimeMillis())
+            .putString(KEY_SOURCE, "local")
             .apply()
     }
 
+    /** Removes the schedule; the shared one comes back on the next sync. */
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        prefs(context).edit().clear().apply()
     }
 
-    fun savedAt(context: Context): Long =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_SAVED_AT, 0L)
+    fun savedAt(context: Context): Long = prefs(context).getLong(KEY_SAVED_AT, 0L)
+
+    fun isShared(context: Context): Boolean = prefs(context).getString(KEY_SOURCE, null) == "shared"
+
+    /**
+     * Downloads the shared schedule (at most every 3 hours unless [force]).
+     * Whenever the shared file changes it replaces whatever is on the phone,
+     * so the newest of "pasted here" / "updated for everyone" wins.
+     * Must be called off the main thread.
+     */
+    fun syncShared(context: Context, force: Boolean) {
+        val p = prefs(context)
+        val now = System.currentTimeMillis()
+        if (!force && now - p.getLong(KEY_SHARED_CHECKED, 0L) < SHARED_CHECK_INTERVAL_MS) return
+
+        val conn = java.net.URL(SHARED_URL).openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 6000
+        conn.readTimeout = 6000
+        conn.useCaches = false
+        val text = try {
+            if (conn.responseCode !in 200..299) return
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
+        p.edit().putLong(KEY_SHARED_CHECKED, now).apply()
+
+        if (text.isBlank() || parse(text).isEmpty()) return
+        if (text == p.getString(KEY_LAST_SHARED, null)) return
+        p.edit()
+            .putString(KEY_TEXT, text)
+            .putLong(KEY_SAVED_AT, now)
+            .putString(KEY_SOURCE, "shared")
+            .putString(KEY_LAST_SHARED, text)
+            .apply()
+    }
 
     private fun text(context: Context): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_TEXT, null)
