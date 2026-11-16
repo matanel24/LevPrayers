@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">תפילות לב</string>
+    <string name="widget_name">התפילה הבאה · לב</string>
+    <string name="widget_description">מציג את התפילה הבאה בבית המדרש של מכון לב</string>
+</resources>
