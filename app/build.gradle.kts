@@ -11,8 +11,10 @@ android {
         applicationId = "com.saltsman.levprayers"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // On GitHub each build gets a higher version, so it installs as an update.
+        val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = run
+        versionName = "1.0.$run"
     }
 
     // Fixed key so every build (local or GitHub) can update the installed app

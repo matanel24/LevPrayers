@@ -2,7 +2,11 @@ name: Build APK
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -21,8 +25,20 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/*.apk LevPrayers.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: LevPrayers-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: LevPrayers.apk
+
+      # Public release with a fixed asset name, so this link always gives the newest build:
+      # https://github.com/<owner>/<repo>/releases/latest/download/LevPrayers.apk
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: תפילות לב 1.0.${{ github.run_number }}
+          body: "להורדה בטלפון: לחץ על LevPrayers.apk למטה."
+          files: LevPrayers.apk
+          make_latest: true
