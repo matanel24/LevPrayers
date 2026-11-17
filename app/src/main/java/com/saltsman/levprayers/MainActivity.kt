@@ -59,7 +59,7 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { load(force = true) }
         findViewById<Button>(R.id.btn_site).setOnClickListener {
-            val url = if (tab == TAB_ZMANIM) ZmanimRepository.SITE_URL else PrayerRepository.PAGE_URL
+            val url = if (tab == TAB_ZMANIM) ZmanimRepository.selectedCity(this).pageUrl else PrayerRepository.PAGE_URL
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
         pasteButton.setOnClickListener { pasteFromClipboard() }
@@ -202,7 +202,7 @@ class MainActivity : Activity() {
         val updated = DateTimeFormatter.ofPattern("HH:mm")
             .format(Instant.ofEpochMilli(day.fetchedAt).atZone(PrayerRepository.ZONE))
         status.text = if (day.stale) "⚠ הזמנים לא מהיום (${day.date})"
-        else "זמני היום ב${day.city.name} · מאתר ישיבה · עודכן ב-$updated"
+        else "זמני היום ב${day.city.name} · מאתר כיפה · עודכן ב-$updated"
 
         val now = PrayerRepository.nowMinutes()
         val next = ZmanimRepository.nextIndex(day.zmanim, now)
@@ -211,7 +211,13 @@ class MainActivity : Activity() {
             val row = inflater.inflate(R.layout.item_prayer, list, false)
             row.findViewById<TextView>(R.id.i_time).text = z.timeText
             row.findViewById<TextView>(R.id.i_name).text = z.name
-            row.findViewById<TextView>(R.id.i_location).visibility = View.GONE
+            val det = row.findViewById<TextView>(R.id.i_location)
+            if (z.detail != null) {
+                det.text = z.detail
+                det.visibility = View.VISIBLE
+            } else {
+                det.visibility = View.GONE
+            }
             val tag = row.findViewById<TextView>(R.id.i_tag)
             when {
                 i == next -> {

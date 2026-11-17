@@ -93,13 +93,14 @@ class ZmanimWidget : AppWidgetProvider() {
 
         /** Short names that fit a 1x1 widget. */
         fun shortZmanName(name: String): String = name
-            .replace("סוף זמן קריאת שמע", "סו\"ז ק\"ש")
-            .replace("סוף זמן תפילה", "סו\"ז תפילה")
-            .replace("למגן אברהם", "מג\"א")
-            .replace("לגר\"א", "גר\"א")
-            .replace("צאת הכוכבים לרבינו תם", "צאה\"כ ר\"ת")
-            .replace("עלות השחר 90 דקות(מעלות)", "עלות 90 דק'")
-            .replace("עלות השחר 72 דקות", "עלות 72 דק'")
+            .replace("\"", "״").replace("'", "׳")
+            .replace("סוף זמן ק״ש - ", "ק״ש ")
+            .replace("סוף זמן קריאת שמע ", "ק״ש ")
+            .replace("סוף זמן תפילה - ", "תפילה ")
+            .replace("סוף זמן תפילה ", "תפילה ")
+            .replace("צאת הכוכבים לרבנו תם", "צאה״כ ר״ת")
+            .replace("צאת הכוכבים לרבינו תם", "צאה״כ ר״ת")
+            .replace("זמן טלית ותפילין", "טלית ותפילין")
 
         private fun tickIntent(context: Context): PendingIntent =
             PendingIntent.getBroadcast(

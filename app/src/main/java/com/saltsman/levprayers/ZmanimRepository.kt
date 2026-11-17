@@ -10,12 +10,16 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-data class Zman(val name: String, val minutes: Int) {
+data class Zman(val name: String, val minutes: Int, val detail: String? = null) {
     val timeText: String
         get() = String.format(Locale.US, "%02d:%02d", minutes / 60, minutes % 60)
 }
 
-data class City(val id: Int, val name: String, val shortName: String = name)
+/** [slug] is the city's page on kipa.co.il: https://www.kipa.co.il/זמני-היום/<slug>/ */
+data class City(val id: Int, val name: String, val slug: String, val shortName: String = name) {
+    val pageUrl: String
+        get() = java.net.URI("https", "www.kipa.co.il", "/זמני-היום/$slug/", null).toASCIIString()
+}
 
 data class ZmanimDay(
     val city: City,
@@ -27,21 +31,20 @@ data class ZmanimDay(
     val failed: Boolean = false,
 )
 
-/** Day times from yeshiva.org.il (the same data as https://www.yeshiva.org.il/calendar/timesday/). */
+/**
+ * Day times from kipa.co.il (https://www.kipa.co.il/זמני-היום/ירושלים/).
+ * (yeshiva.org.il blocks use outside its own site, so it isn't used.)
+ */
 object ZmanimRepository {
 
-    /** Place ids from yeshiva.org.il's place picker. */
+    /** ids are only for remembering the choice on the phone. */
     val CITIES = listOf(
-        City(156, "ירושלים"),
-        City(211, "קרני שומרון"),
-        City(436, "עזה"),
-        City(153, "טבריה"),
-        City(130, "אילת"),
-        City(233, "רמת הגולן (קצרין)", "קצרין"),
+        City(156, "ירושלים", "ירושלים"),
+        City(211, "קרני שומרון", "קרני-שומרון"),
+        City(153, "טבריה", "טבריה"),
+        City(130, "אילת", "אילת"),
+        City(233, "רמת הגולן (קצרין)", "קצרין", "קצרין"),
     )
-
-    const val SITE_URL = "https://www.yeshiva.org.il/calendar/timesday/"
-    private const val API_URL = "https://www.yeshiva.org.il/api/times/AllDailyTimes?place="
     private const val PREFS = "zmanim"
     private const val KEY_CITY = "city"
 
@@ -78,11 +81,10 @@ object ZmanimRepository {
     }
 
     private fun fetch(city: City): Pair<String, List<Zman>> {
-        val conn = URL(API_URL + city.id).openConnection() as HttpURLConnection
+        val conn = URL(city.pageUrl).openConnection() as HttpURLConnection
         conn.connectTimeout = 8000
-        conn.readTimeout = 8000
+        conn.readTimeout = 10000
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0")
-        conn.setRequestProperty("Accept", "application/json")
         try {
             if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -92,24 +94,47 @@ object ZmanimRepository {
         }
     }
 
-    /** {"standardTimes": {"date": {"eng": {"ldate": "17/11/2026"}}, "times": [{"name": "...", "value": "4:37"}, ...]}} */
-    fun parse(body: String): Pair<String, List<Zman>> {
-        val st = JSONObject(body).getJSONObject("standardTimes")
-        val ldate = st.getJSONObject("date").getJSONObject("eng").getString("ldate")
-        val date = LocalDate.parse(ldate.trim(), DateTimeFormatter.ofPattern("d/M/yyyy")).toString()
-        val arr = st.getJSONArray("times")
-        val list = (0 until arr.length()).mapNotNull { i ->
-            val o = arr.getJSONObject(i)
-            val m = Regex("^(\\d{1,2}):(\\d{2})").find(o.optString("value").trim()) ?: return@mapNotNull null
-            Zman(o.getString("name").trim(), m.groupValues[1].toInt() * 60 + m.groupValues[2].toInt())
-        }
-        if (list.isEmpty()) throw IOException("No times in response")
+    /**
+     * The page has:
+     * <div class="lz-list" ... data-date="2026-11-17">
+     *   <div class="lz-row" data-m="293"><span class="lz-row__n">עלות השחר<span class="lz-row__d">16.1° לפני הזריחה</span></span>
+     *   <span class="lz-row__t">04:53</span></div> ...
+     */
+    fun parse(html: String): Pair<String, List<Zman>> {
+        val listStart = html.indexOf("class=\"lz-list\"")
+        if (listStart < 0) throw IOException("No times list on page")
+        val head = html.substring(listStart, minOf(html.length, listStart + 300))
+        val date = Regex("data-date=\"(\\d{4}-\\d{2}-\\d{2})\"").find(head)?.groupValues?.get(1)
+            ?: PrayerRepository.today()
+        val end = html.indexOf("</section>", listStart).let { if (it > 0) it else html.length }
+        val block = html.substring(listStart, end)
+
+        val row = Regex(
+            "class=\"lz-row\"[^>]*>\\s*<span class=\"lz-row__n\">(.*?)<span class=\"lz-row__t\">\\s*(\\d{1,2}):(\\d{2})",
+            RegexOption.DOT_MATCHES_ALL,
+        )
+        val detailRe = Regex("<span class=\"lz-row__d\">(.*?)</span>", RegexOption.DOT_MATCHES_ALL)
+        val list = row.findAll(block).map { m ->
+            val nameHtml = m.groupValues[1]
+            val detail = detailRe.find(nameHtml)?.groupValues?.get(1)?.let { clean(it) }?.ifEmpty { null }
+            val name = clean(nameHtml.replace(detailRe, ""))
+            Zman(name, m.groupValues[2].toInt() * 60 + m.groupValues[3].toInt(), detail)
+        }.filter { it.name.isNotEmpty() }.toList()
+        if (list.isEmpty()) throw IOException("No times in page")
         return date to list
     }
 
+    private fun clean(s: String): String =
+        android.text.Html.fromHtml(s, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+            .replace('\u00A0', ' ').replace(Regex("\\s+"), " ").trim()
+
     private fun writeCache(context: Context, d: ZmanimDay) {
         val arr = JSONArray()
-        d.zmanim.forEach { arr.put(JSONObject().put("n", it.name).put("m", it.minutes)) }
+        d.zmanim.forEach { z ->
+            val o = JSONObject().put("n", z.name).put("m", z.minutes)
+            if (z.detail != null) o.put("d", z.detail)
+            arr.put(o)
+        }
         val json = JSONObject().put("date", d.date).put("fetchedAt", d.fetchedAt).put("z", arr)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("cache_${d.city.id}", json.toString()).apply()
@@ -123,7 +148,7 @@ object ZmanimRepository {
             val arr = json.getJSONArray("z")
             val list = (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
-                Zman(o.getString("n"), o.getInt("m"))
+                Zman(o.getString("n"), o.getInt("m"), if (o.has("d")) o.getString("d") else null)
             }
             ZmanimDay(city, json.getString("date"), list, json.getLong("fetchedAt"))
         } catch (e: Exception) {
