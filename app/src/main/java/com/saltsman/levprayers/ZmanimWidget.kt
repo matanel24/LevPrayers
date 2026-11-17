@@ -46,8 +46,13 @@ class ZmanimWidget : AppWidgetProvider() {
 
         fun updateAll(context: Context, day: ZmanimDay?) {
             val mgr = AppWidgetManager.getInstance(context)
+            BaseTile.requestUpdate(context)
             val ids = mgr.getAppWidgetIds(ComponentName(context, ZmanimWidget::class.java))
-            if (ids.isEmpty()) return
+            if (ids.isEmpty()) {
+                // No widget on the home screen: still wake up at the next change to refresh the tile.
+                scheduleNextTick(context, day)
+                return
+            }
             mgr.updateAppWidget(ids, buildViews(context, day))
             scheduleNextTick(context, day)
         }

@@ -63,8 +63,13 @@ class PrayerWidget : AppWidgetProvider() {
         /** Push a schedule to every widget on the home screen and plan the next change. */
         fun updateAll(context: Context, schedule: DaySchedule?) {
             val mgr = AppWidgetManager.getInstance(context)
+            BaseTile.requestUpdate(context)
             val ids = mgr.getAppWidgetIds(ComponentName(context, PrayerWidget::class.java))
-            if (ids.isEmpty()) return
+            if (ids.isEmpty()) {
+                // No widget on the home screen: still wake up at the next change to refresh the tile.
+                scheduleNextTick(context, schedule)
+                return
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Android 12+: hand the launcher both layouts; it picks by the widget's size.
