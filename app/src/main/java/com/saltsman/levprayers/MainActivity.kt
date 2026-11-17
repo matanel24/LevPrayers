@@ -7,8 +7,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import java.time.Instant
@@ -18,11 +21,23 @@ import java.util.Locale
 
 class MainActivity : Activity() {
 
+    companion object {
+        const val EXTRA_TAB = "tab"
+        const val TAB_PRAYERS = "prayers"
+        const val TAB_ZMANIM = "zmanim"
+    }
+
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
     private lateinit var waStatus: TextView
     private lateinit var dateView: TextView
+    private lateinit var title: TextView
+    private lateinit var tabPrayers: TextView
+    private lateinit var tabZmanim: TextView
+    private lateinit var citySpinner: Spinner
+    private lateinit var pasteButton: Button
     private val hebrew: Locale = Locale.forLanguageTag("he")
+    private var tab = TAB_PRAYERS
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,26 +46,44 @@ class MainActivity : Activity() {
         status = findViewById(R.id.status)
         waStatus = findViewById(R.id.wa_status)
         dateView = findViewById(R.id.date)
+        title = findViewById(R.id.title)
+        tabPrayers = findViewById(R.id.tab_prayers)
+        tabZmanim = findViewById(R.id.tab_zmanim)
+        citySpinner = findViewById(R.id.city_spinner)
+        pasteButton = findViewById(R.id.btn_paste)
+
+        tab = savedInstanceState?.getString(EXTRA_TAB) ?: intent.getStringExtra(EXTRA_TAB) ?: TAB_PRAYERS
+
+        tabPrayers.setOnClickListener { switchTab(TAB_PRAYERS) }
+        tabZmanim.setOnClickListener { switchTab(TAB_ZMANIM) }
 
         findViewById<Button>(R.id.btn_refresh).setOnClickListener { load(force = true) }
         findViewById<Button>(R.id.btn_site).setOnClickListener {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PrayerRepository.PAGE_URL)))
+            val url = if (tab == TAB_ZMANIM) ZmanimRepository.SITE_URL else PrayerRepository.PAGE_URL
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         }
-        val paste = findViewById<Button>(R.id.btn_paste)
-        paste.setOnClickListener { pasteFromClipboard() }
-        paste.setOnLongClickListener {
+        pasteButton.setOnClickListener { pasteFromClipboard() }
+        pasteButton.setOnLongClickListener {
             WhatsAppSchedule.clear(applicationContext)
             Toast.makeText(this, "הלוח שהדבקת נמחק, טוען את הלוח המשותף", Toast.LENGTH_SHORT).show()
             load(force = true)
             true
         }
 
+        setupCitySpinner()
         handleShare(intent)
+        applyTabUi()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(EXTRA_TAB, tab)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        intent.getStringExtra(EXTRA_TAB)?.let { tab = it; applyTabUi() }
         handleShare(intent)
     }
 
@@ -62,12 +95,55 @@ class MainActivity : Activity() {
         load(force = false)
     }
 
+    // ---- tabs ----
+
+    private fun switchTab(newTab: String) {
+        if (tab == newTab) return
+        tab = newTab
+        applyTabUi()
+        load(force = false)
+    }
+
+    private fun applyTabUi() {
+        val z = tab == TAB_ZMANIM
+        title.text = if (z) "זמני היום" else "תפילות היום · מכון לב"
+        styleTab(tabPrayers, !z)
+        styleTab(tabZmanim, z)
+        citySpinner.visibility = if (z) View.VISIBLE else View.GONE
+        pasteButton.visibility = if (z) View.GONE else View.VISIBLE
+        waStatus.visibility = if (z) View.GONE else View.VISIBLE
+    }
+
+    private fun styleTab(v: TextView, selected: Boolean) {
+        v.setBackgroundResource(if (selected) R.drawable.tag_bg else R.drawable.item_bg)
+        v.setTextColor(getColor(if (selected) R.color.on_accent else R.color.text_primary))
+    }
+
+    private fun setupCitySpinner() {
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, ZmanimRepository.CITIES.map { "📍 " + it.name })
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        citySpinner.adapter = adapter
+        val current = ZmanimRepository.CITIES.indexOf(ZmanimRepository.selectedCity(this)).coerceAtLeast(0)
+        citySpinner.setSelection(current, false)
+        citySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val city = ZmanimRepository.CITIES[position]
+                if (city == ZmanimRepository.selectedCity(this@MainActivity)) return
+                ZmanimRepository.setCity(applicationContext, city)
+                load(force = false)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
     // ---- WhatsApp schedule input ----
 
     private fun handleShare(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) return
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
         intent.action = null // don't import again later
+        tab = TAB_PRAYERS
         importWhatsApp(text)
     }
 
@@ -93,22 +169,63 @@ class MainActivity : Activity() {
         load(force = false)
     }
 
-    // ---- loading & rendering ----
+    // ---- loading ----
 
     private fun load(force: Boolean) {
         status.text = "טוען…"
         val app = applicationContext
+        val forTab = tab
         Thread {
-            val schedule = PrayerRepository.load(app, force)
-            try {
-                PrayerWidget.updateAll(app, schedule)
-            } catch (e: Exception) {
-            }
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) render(schedule, force)
+            if (forTab == TAB_ZMANIM) {
+                val day = ZmanimRepository.load(app, force)
+                try { ZmanimWidget.updateAll(app, day) } catch (e: Exception) { }
+                runOnUiThread { if (!isFinishing && !isDestroyed && tab == forTab) renderZmanim(day, force) }
+            } else {
+                val schedule = PrayerRepository.load(app, force)
+                try { PrayerWidget.updateAll(app, schedule) } catch (e: Exception) { }
+                runOnUiThread { if (!isFinishing && !isDestroyed && tab == forTab) render(schedule, force) }
             }
         }.start()
     }
+
+    // ---- zmanim ----
+
+    private fun renderZmanim(day: ZmanimDay?, force: Boolean) {
+        list.removeAllViews()
+        if (day == null || day.zmanim.isEmpty()) {
+            status.text = "לא הצלחתי לטעון את זמני היום. בדוק חיבור לאינטרנט ולחץ רענון."
+            return
+        }
+        if (force && day.failed) {
+            Toast.makeText(this, "הרענון נכשל, מוצגים הזמנים השמורים", Toast.LENGTH_SHORT).show()
+        }
+        val updated = DateTimeFormatter.ofPattern("HH:mm")
+            .format(Instant.ofEpochMilli(day.fetchedAt).atZone(PrayerRepository.ZONE))
+        status.text = if (day.stale) "⚠ הזמנים לא מהיום (${day.date})"
+        else "זמני היום ב${day.city.name} · מאתר ישיבה · עודכן ב-$updated"
+
+        val now = PrayerRepository.nowMinutes()
+        val next = ZmanimRepository.nextIndex(day.zmanim, now)
+        val inflater = LayoutInflater.from(this)
+        day.zmanim.forEachIndexed { i, z ->
+            val row = inflater.inflate(R.layout.item_prayer, list, false)
+            row.findViewById<TextView>(R.id.i_time).text = z.timeText
+            row.findViewById<TextView>(R.id.i_name).text = z.name
+            row.findViewById<TextView>(R.id.i_location).visibility = View.GONE
+            val tag = row.findViewById<TextView>(R.id.i_tag)
+            when {
+                i == next -> {
+                    row.setBackgroundResource(R.drawable.item_next_bg)
+                    tag.text = "הבא"
+                    tag.visibility = View.VISIBLE
+                }
+                z.minutes < now -> row.alpha = 0.45f
+            }
+            list.addView(row)
+        }
+    }
+
+    // ---- prayers ----
 
     private fun render(schedule: DaySchedule?, force: Boolean) {
         val waSaved = WhatsAppSchedule.savedAt(this)

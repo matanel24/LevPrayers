@@ -3,4 +3,6 @@
     <string name="app_name">תפילות לב</string>
     <string name="widget_name">התפילה הבאה · לב</string>
     <string name="widget_description">מציג את התפילה הבאה בבית המדרש של מכון לב</string>
+    <string name="zmanim_widget_name">הזמן הבא · זמני היום</string>
+    <string name="zmanim_widget_description">מציג את זמן היום הבא (נץ, סוף זמן ק״ש, שקיעה…) בעיר שבחרת</string>
 </resources>
