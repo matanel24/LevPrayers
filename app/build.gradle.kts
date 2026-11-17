@@ -17,21 +17,28 @@ android {
         versionName = "1.0.$run"
     }
 
-    // Fixed key so every build (local or GitHub) can update the installed app
-    // without uninstalling first.
+    // Release signing key comes from GitHub Secrets (see .github/workflows/build.yml) and is
+    // never stored in the repo. Without it (e.g. a local build) the release is signed with the
+    // machine's own debug key, which can't update the published app.
+    val ksPath: String? = System.getenv("LEV_KEYSTORE_PATH")
+    val ksPass: String? = System.getenv("LEV_KEYSTORE_PASSWORD")
+    val hasReleaseKey = !ksPath.isNullOrEmpty() && !ksPass.isNullOrEmpty()
+
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("lev-debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (hasReleaseKey) {
+            create("lev") {
+                storeFile = file(ksPath!!)
+                storePassword = ksPass
+                keyAlias = "lev"
+                keyPassword = ksPass
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseKey) "lev" else "debug")
         }
     }
 

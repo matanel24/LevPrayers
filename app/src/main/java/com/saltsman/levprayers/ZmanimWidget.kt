@@ -79,7 +79,14 @@ class ZmanimWidget : AppWidgetProvider() {
             val z = if (idx >= 0) zmanim[idx] else zmanim.first()
             v.setTextViewText(R.id.w_name, shortZmanName(z.name))
             v.setTextViewText(R.id.w_time, z.timeText)
-            v.setTextViewText(R.id.w_location, if (idx >= 0) "הזמן הבא" else "מחר")
+            v.setTextViewText(
+                R.id.w_location,
+                when {
+                    idx < 0 -> "מחר"
+                    z.minutes <= PrayerRepository.nowMinutes() -> "עכשיו"
+                    else -> "הזמן הבא"
+                },
+            )
             v.setViewVisibility(R.id.w_location, View.VISIBLE)
             return v
         }
@@ -101,7 +108,7 @@ class ZmanimWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
 
-        /** Wake one minute after the shown zman, so the widget moves to the next one. */
+        /** Wake at the shown zman (label -> "עכשיו"), then GRACE_MINUTES later to move to the next one. */
         private fun scheduleNextTick(context: Context, day: ZmanimDay?) {
             val am = context.getSystemService(AlarmManager::class.java) ?: return
             val zone = PrayerRepository.ZONE
@@ -110,7 +117,11 @@ class ZmanimWidget : AppWidgetProvider() {
             val idx = ZmanimRepository.nextIndex(zmanim)
             val trigger: ZonedDateTime = when {
                 day == null || day.stale || zmanim.isEmpty() -> now.plusMinutes(30)
-                idx >= 0 -> LocalDate.now(zone).atStartOfDay(zone).plusMinutes(zmanim[idx].minutes + 1L)
+                idx >= 0 -> {
+                    val at = zmanim[idx].minutes
+                    val target = if (at > PrayerRepository.nowMinutes()) at else at + ZmanimRepository.GRACE_MINUTES
+                    LocalDate.now(zone).atStartOfDay(zone).plusMinutes(target.toLong())
+                }
                 else -> LocalDate.now(zone).plusDays(1).atStartOfDay(zone).plusMinutes(5)
             }
             am.setWindow(AlarmManager.RTC, trigger.toInstant().toEpochMilli(), 60_000L, tickIntent(context))

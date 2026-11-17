@@ -219,7 +219,7 @@ class MainActivity : Activity() {
                     tag.text = "הבא"
                     tag.visibility = View.VISIBLE
                 }
-                z.minutes < now -> row.alpha = 0.45f
+                z.minutes + ZmanimRepository.GRACE_MINUTES <= now -> row.alpha = 0.45f
             }
             list.addView(row)
         }

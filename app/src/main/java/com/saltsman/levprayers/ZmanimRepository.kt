@@ -54,9 +54,12 @@ object ZmanimRepository {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_CITY, city.id).apply()
     }
 
-    /** Index of the next zman (from this minute on), or -1 when today's are over. */
+    /** A zman stays "next" until this many minutes after it passes. */
+    const val GRACE_MINUTES = 5
+
+    /** Index of the next zman (not yet GRACE_MINUTES past), or -1 when today's are over. */
     fun nextIndex(zmanim: List<Zman>, now: Int = PrayerRepository.nowMinutes()): Int =
-        zmanim.indexOfFirst { it.minutes >= now }
+        zmanim.indexOfFirst { it.minutes + GRACE_MINUTES > now }
 
     /** Today's times for [city]; cached per city per day. Must be called off the main thread. */
     fun load(context: Context, force: Boolean = false, city: City = selectedCity(context)): ZmanimDay? {
