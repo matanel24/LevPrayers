@@ -8,15 +8,8 @@ jobs:
     steps:
       - run: |
           UA="Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0"
-          for c in עזה רמת-הגולן גוש-קטיף נווה-דקלים; do
-            echo "REDIR $c -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -A "$UA" "https://www.kipa.co.il/זמני-היום/$c/" | python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read()))')"
+          for c in בית-שמש שדרות מעלה-אדומים נתיב-העשרה אשקלון ראשון-לציון בני-ברק xyzxyz; do
+            r=$(curl -s -o p.html -w '%{http_code} %{redirect_url}' -A "$UA" "https://www.kipa.co.il/זמני-היום/$c/")
+            h1=$(grep -o '<h1>[^<]*</h1>' p.html | head -1)
+            echo "PLACE $c -> $(echo $r | python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read().strip()))') $h1 list=$(grep -c 'lz-list' p.html)"
           done
-          curl -s -A "$UA" "https://www.kipa.co.il/זמני-היום/ירושלים/" -o j.html
-          python3 - <<'PY'
-          import re
-          h=open('j.html',encoding='utf-8').read()
-          i=h.find('משיכיר')
-          if i<0: i=h.find('טלית')
-          s=re.sub(r'\s+',' ',h[i-2500:i+3500])
-          for k in range(0,len(s),900): print('SNIP',s[k:k+900])
-          PY
