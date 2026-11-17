@@ -55,6 +55,43 @@ object ZmanimRepository {
         return allCities(context).firstOrNull { it.id == id } ?: CITIES[0]
     }
 
+    // ---- what the widget / control-center button show ----
+
+    private const val KEY_WIDGET_CITY = "widget_city"     // -1 = same as in the app
+    private const val KEY_WIDGET_ZMANIM = "widget_zmanim" // names to show; missing = all
+
+    /** null = follow the place chosen in the app. */
+    fun widgetCityChoice(context: Context): City? {
+        val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_WIDGET_CITY, -1)
+        if (id == -1) return null
+        return allCities(context).firstOrNull { it.id == id }
+    }
+
+    fun setWidgetCity(context: Context, city: City?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_WIDGET_CITY, city?.id ?: -1).apply()
+    }
+
+    fun widgetCity(context: Context): City = widgetCityChoice(context) ?: selectedCity(context)
+
+    /** null = show all zmanim. */
+    fun widgetZmanim(context: Context): Set<String>? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_WIDGET_ZMANIM, null)?.toSet()
+
+    fun setWidgetZmanim(context: Context, names: Set<String>?) {
+        val e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        if (names == null) e.remove(KEY_WIDGET_ZMANIM) else e.putStringSet(KEY_WIDGET_ZMANIM, names)
+        e.apply()
+    }
+
+    /** The day for the widget and the button: their place, only the chosen zmanim. Off the main thread. */
+    fun widgetDay(context: Context, force: Boolean = false): ZmanimDay? {
+        val day = load(context, force, widgetCity(context)) ?: return null
+        val chosen = widgetZmanim(context) ?: return day
+        val filtered = day.zmanim.filter { it.name in chosen }
+        return day.copy(zmanim = filtered.ifEmpty { day.zmanim })
+    }
+
     // ---- places the user added ----
 
     /** Built-in places + the ones added on this phone. */

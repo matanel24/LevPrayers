@@ -129,7 +129,7 @@ class ZmanimTileService : BaseTile() {
     override val tab = MainActivity.TAB_ZMANIM
 
     override fun compute(): TileText {
-        val day = ZmanimRepository.load(applicationContext)
+        val day = ZmanimRepository.widgetDay(applicationContext)
         val list = day?.zmanim.orEmpty()
         if (list.isEmpty()) return TileText("זמני היום", "לחץ לטעינה", null)
         val idx = ZmanimRepository.nextIndex(list)

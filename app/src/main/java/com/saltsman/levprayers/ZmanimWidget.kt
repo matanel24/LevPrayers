@@ -33,7 +33,7 @@ class ZmanimWidget : AppWidgetProvider() {
         val app = context.applicationContext
         Thread {
             try {
-                updateAll(app, ZmanimRepository.load(app))
+                updateAll(app, ZmanimRepository.widgetDay(app))
             } catch (e: Exception) {
             } finally {
                 pending.finish()

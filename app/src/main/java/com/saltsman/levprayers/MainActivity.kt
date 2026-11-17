@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var tabZmanim: TextView
     private lateinit var citySpinner: Spinner
     private lateinit var pasteButton: Button
+    private lateinit var widgetSettingsButton: Button
     private val hebrew: Locale = Locale.forLanguageTag("he")
     private var tab = TAB_PRAYERS
 
@@ -51,6 +52,8 @@ class MainActivity : Activity() {
         tabZmanim = findViewById(R.id.tab_zmanim)
         citySpinner = findViewById(R.id.city_spinner)
         pasteButton = findViewById(R.id.btn_paste)
+        widgetSettingsButton = findViewById(R.id.btn_widget_settings)
+        widgetSettingsButton.setOnClickListener { showWidgetSettings() }
 
         tab = savedInstanceState?.getString(EXTRA_TAB) ?: intent.getStringExtra(EXTRA_TAB) ?: TAB_PRAYERS
 
@@ -111,6 +114,7 @@ class MainActivity : Activity() {
         styleTab(tabZmanim, z)
         citySpinner.visibility = if (z) View.VISIBLE else View.GONE
         pasteButton.visibility = if (z) View.GONE else View.VISIBLE
+        widgetSettingsButton.visibility = if (z) View.VISIBLE else View.GONE
         waStatus.visibility = if (z) View.GONE else View.VISIBLE
     }
 
@@ -218,6 +222,85 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---- what the widget / control-center button show ----
+
+    private fun showWidgetSettings() {
+        val city = ZmanimRepository.widgetCityChoice(this)
+        val cityText = city?.name ?: "כמו באפליקציה (${ZmanimRepository.selectedCity(this).name})"
+        val chosen = ZmanimRepository.widgetZmanim(this)
+        val zmanimText = if (chosen == null) "כל הזמנים" else "${chosen.size} זמנים נבחרו"
+        android.app.AlertDialog.Builder(this)
+            .setTitle("ווידג'ט \"הזמן הבא\" והכפתור במרכז הבקרה")
+            .setItems(arrayOf("📍 מקום: $cityText", "🕐 אילו זמנים: $zmanimText")) { _, which ->
+                if (which == 0) chooseWidgetCity() else chooseWidgetZmanim()
+            }
+            .setNegativeButton("סגור", null)
+            .show()
+    }
+
+    private fun chooseWidgetCity() {
+        val cities = ZmanimRepository.allCities(this)
+        val current = ZmanimRepository.widgetCityChoice(this)
+        val labels = arrayOf("כמו באפליקציה") + cities.map { it.name }.toTypedArray()
+        val checked = if (current == null) 0 else cities.indexOfFirst { it.id == current.id } + 1
+        android.app.AlertDialog.Builder(this)
+            .setTitle("מקום לווידג'ט ולכפתור")
+            .setSingleChoiceItems(labels, checked) { d, which ->
+                ZmanimRepository.setWidgetCity(applicationContext, if (which == 0) null else cities[which - 1])
+                d.dismiss()
+                refreshWidgetAndTile()
+                Toast.makeText(this, "נשמר ✓", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("ביטול", null)
+            .show()
+    }
+
+    private fun chooseWidgetZmanim() {
+        val app = applicationContext
+        Thread {
+            val day = ZmanimRepository.load(app, false, ZmanimRepository.widgetCity(app))
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val names = day?.zmanim?.map { it.name }?.distinct().orEmpty()
+                if (names.isEmpty()) {
+                    Toast.makeText(this, "לא הצלחתי לטעון את רשימת הזמנים. בדוק חיבור ונסה שוב.", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val chosen = ZmanimRepository.widgetZmanim(this)
+                val checked = BooleanArray(names.size) { chosen == null || names[it] in chosen }
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("אילו זמנים להציג?")
+                    .setMultiChoiceItems(names.toTypedArray(), checked) { _, which, isChecked -> checked[which] = isChecked }
+                    .setPositiveButton("שמור") { _, _ ->
+                        val sel = names.filterIndexed { i, _ -> checked[i] }.toSet()
+                        when {
+                            sel.isEmpty() -> {
+                                Toast.makeText(this, "צריך לבחור לפחות זמן אחד", Toast.LENGTH_SHORT).show()
+                                return@setPositiveButton
+                            }
+                            sel.size == names.size -> ZmanimRepository.setWidgetZmanim(app, null)
+                            else -> ZmanimRepository.setWidgetZmanim(app, sel)
+                        }
+                        refreshWidgetAndTile()
+                        Toast.makeText(this, "נשמר ✓", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNeutralButton("הכל") { _, _ ->
+                        ZmanimRepository.setWidgetZmanim(app, null)
+                        refreshWidgetAndTile()
+                    }
+                    .setNegativeButton("ביטול", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun refreshWidgetAndTile() {
+        val app = applicationContext
+        Thread {
+            try { ZmanimWidget.updateAll(app, ZmanimRepository.widgetDay(app)) } catch (e: Exception) { }
+        }.start()
+    }
+
     // ---- WhatsApp schedule input ----
 
     private fun handleShare(intent: Intent?) {
@@ -259,7 +342,7 @@ class MainActivity : Activity() {
         Thread {
             if (forTab == TAB_ZMANIM) {
                 val day = ZmanimRepository.load(app, force)
-                try { ZmanimWidget.updateAll(app, day) } catch (e: Exception) { }
+                try { ZmanimWidget.updateAll(app, ZmanimRepository.widgetDay(app)) } catch (e: Exception) { }
                 runOnUiThread { if (!isFinishing && !isDestroyed && tab == forTab) renderZmanim(day, force) }
             } else {
                 val schedule = PrayerRepository.load(app, force)
