@@ -8,12 +8,15 @@ jobs:
     steps:
       - run: |
           UA="Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0"
-          for c in ירושלים קרני-שומרון עזה טבריה אילת קצרין רמת-הגולן; do
-            code=$(curl -s -o p.html -w '%{http_code}' -A "$UA" "https://www.kipa.co.il/זמני-היום/$c/")
-            echo "CITY $c -> $code bytes=$(wc -c < p.html) times=$(grep -oE '[0-9]{2}:[0-9]{2}' p.html | head -16 | tr '\n' ' ')"
+          for c in עזה רמת-הגולן גוש-קטיף נווה-דקלים; do
+            echo "REDIR $c -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -A "$UA" "https://www.kipa.co.il/זמני-היום/$c/" | python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read()))')"
           done
           curl -s -A "$UA" "https://www.kipa.co.il/זמני-היום/ירושלים/" -o j.html
-          i=$(grep -b -o 'עלות השחר' j.html | head -1 | cut -d: -f1); echo "OFFSET $i"
-          dd if=j.html bs=1 skip=$((i-600)) count=2600 2>/dev/null | tr '\n' ' ' | sed 's/^/SNIP /'
-          echo
-          curl -s https://www.kipa.co.il/robots.txt | sed 's/^/ROBOTS /' | head -30
+          python3 - <<'PY'
+          import re
+          h=open('j.html',encoding='utf-8').read()
+          i=h.find('משיכיר')
+          if i<0: i=h.find('טלית')
+          s=re.sub(r'\s+',' ',h[i-2500:i+3500])
+          for k in range(0,len(s),900): print('SNIP',s[k:k+900])
+          PY
