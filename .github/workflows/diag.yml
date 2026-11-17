@@ -7,12 +7,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          U='https://www.yeshiva.org.il/api/times/AllDailyTimes?place=156'
-          for ua in "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0" "Dalvik/2.1.0 (Linux; U; Android 14; 23078PND5G Build/UKQ1)" "Mozilla/5.0 (Linux; Android 14; 23078PND5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"; do
-            code=$(curl -s -o body.txt -w '%{http_code} %{content_type}' -A "$ua" -H 'Accept: application/json' "$U")
-            echo "UA=[$ua] -> $code ; $(head -c 150 body.txt | tr '\n' ' ')"
+          UA="Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0"
+          for c in ירושלים קרני-שומרון עזה טבריה אילת קצרין רמת-הגולן; do
+            code=$(curl -s -o p.html -w '%{http_code}' -A "$UA" "https://www.kipa.co.il/זמני-היום/$c/")
+            echo "CITY $c -> $code bytes=$(wc -c < p.html) times=$(grep -oE '[0-9]{2}:[0-9]{2}' p.html | head -16 | tr '\n' ' ')"
           done
-          echo "--- with referer"
-          curl -s -o body.txt -w '%{http_code}\n' -A "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0" -e 'https://www.yeshiva.org.il/calendar/timesday/' "$U"; head -c 150 body.txt; echo
-          echo "--- no headers"
-          curl -s -o body.txt -w '%{http_code}\n' -A "" "$U"; head -c 150 body.txt
+          curl -s -A "$UA" "https://www.kipa.co.il/זמני-היום/ירושלים/" -o j.html
+          i=$(grep -b -o 'עלות השחר' j.html | head -1 | cut -d: -f1); echo "OFFSET $i"
+          dd if=j.html bs=1 skip=$((i-600)) count=2600 2>/dev/null | tr '\n' ' ' | sed 's/^/SNIP /'
+          echo
+          curl -s https://www.kipa.co.il/robots.txt | sed 's/^/ROBOTS /' | head -30
