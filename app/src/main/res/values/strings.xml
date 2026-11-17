@@ -5,4 +5,6 @@
     <string name="widget_description">מציג את התפילה הבאה בבית המדרש של מכון לב</string>
     <string name="zmanim_widget_name">הזמן הבא · זמני היום</string>
     <string name="zmanim_widget_description">מציג את זמן היום הבא (נץ, סוף זמן ק״ש, שקיעה…) בעיר שבחרת</string>
+    <string name="zmanim_tile_name">הזמן הבא</string>
+    <string name="prayer_tile_name">התפילה הבאה</string>
 </resources>
