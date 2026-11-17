@@ -119,22 +119,103 @@ class MainActivity : Activity() {
         v.setTextColor(getColor(if (selected) R.color.on_accent else R.color.text_primary))
     }
 
+    /** Places list + "add place" (+ "remove place" when there are added places) at the end. */
     private fun setupCitySpinner() {
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, ZmanimRepository.CITIES.map { "📍 " + it.name })
+        val cities = ZmanimRepository.allCities(this)
+        val hasCustom = ZmanimRepository.customCities(this).isNotEmpty()
+        val items = cities.map { "📍 " + it.name } +
+            listOf("➕ הוסף מקום…") +
+            (if (hasCustom) listOf("➖ הסר מקום שהוספתי…") else emptyList())
+
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        citySpinner.onItemSelectedListener = null
         citySpinner.adapter = adapter
-        val current = ZmanimRepository.CITIES.indexOf(ZmanimRepository.selectedCity(this)).coerceAtLeast(0)
+        val current = cities.indexOfFirst { it.id == ZmanimRepository.selectedCity(this).id }.coerceAtLeast(0)
         citySpinner.setSelection(current, false)
         citySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val city = ZmanimRepository.CITIES[position]
-                if (city == ZmanimRepository.selectedCity(this@MainActivity)) return
-                ZmanimRepository.setCity(applicationContext, city)
-                load(force = false)
+                when {
+                    position < cities.size -> {
+                        val city = cities[position]
+                        if (city.id == ZmanimRepository.selectedCity(this@MainActivity).id) return
+                        ZmanimRepository.setCity(applicationContext, city)
+                        load(force = false)
+                    }
+                    position == cities.size -> {
+                        citySpinner.setSelection(current, false)
+                        showAddPlaceDialog()
+                    }
+                    else -> {
+                        citySpinner.setSelection(current, false)
+                        showRemovePlaceDialog()
+                    }
+                }
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+    }
+
+    private fun showAddPlaceDialog() {
+        val input = android.widget.EditText(this).apply {
+            hint = "למשל: בית שמש, שדרות, מעלה אדומים"
+            setSingleLine()
+            textDirection = View.TEXT_DIRECTION_RTL
+        }
+        val box = android.widget.FrameLayout(this).apply {
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("הוספת מקום")
+            .setMessage("כתוב שם של עיר או יישוב. הזמנים נלקחים מאתר כיפה.")
+            .setView(box)
+            .setPositiveButton("הוסף") { _, _ -> addPlace(input.text.toString()) }
+            .setNegativeButton("ביטול", null)
+            .show()
+    }
+
+    private fun addPlace(name: String) {
+        if (name.isBlank()) return
+        status.text = "מחפש את \"${name.trim()}\" באתר כיפה…"
+        val app = applicationContext
+        Thread {
+            val found = try { ZmanimRepository.lookup(name) } catch (e: Exception) { null }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (found == null) {
+                    status.text = ""
+                    Toast.makeText(
+                        this,
+                        "לא מצאתי את \"${name.trim()}\" באתר כיפה. נסה כתיב אחר (למשל בלי ראשי תיבות) או בדוק את החיבור.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@runOnUiThread
+                }
+                val city = ZmanimRepository.addCustom(app, found)
+                ZmanimRepository.setCity(app, city)
+                Toast.makeText(this, "נוסף: ${city.name} ✓", Toast.LENGTH_SHORT).show()
+                setupCitySpinner()
+                load(force = false)
+            }
+        }.start()
+    }
+
+    private fun showRemovePlaceDialog() {
+        val custom = ZmanimRepository.customCities(this)
+        if (custom.isEmpty()) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle("איזה מקום להסיר?")
+            .setItems(custom.map { it.name }.toTypedArray()) { _, which ->
+                ZmanimRepository.removeCustom(applicationContext, custom[which])
+                Toast.makeText(this, "הוסר: ${custom[which].name}", Toast.LENGTH_SHORT).show()
+                setupCitySpinner()
+                load(force = false)
+            }
+            .setNegativeButton("ביטול", null)
+            .show()
     }
 
     // ---- WhatsApp schedule input ----

@@ -48,9 +48,98 @@ object ZmanimRepository {
     private const val PREFS = "zmanim"
     private const val KEY_CITY = "city"
 
+    private const val KEY_CUSTOM = "custom_cities"
+
     fun selectedCity(context: Context): City {
         val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_CITY, CITIES[0].id)
-        return CITIES.firstOrNull { it.id == id } ?: CITIES[0]
+        return allCities(context).firstOrNull { it.id == id } ?: CITIES[0]
+    }
+
+    // ---- places the user added ----
+
+    /** Built-in places + the ones added on this phone. */
+    fun allCities(context: Context): List<City> = CITIES + customCities(context)
+
+    fun customCities(context: Context): List<City> {
+        val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_CUSTOM, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                customCity(o.getString("n"), o.getString("s"))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun customCity(name: String, slug: String) = City(0x40000000 or (slug.hashCode() and 0x3FFFFFFF), name, slug)
+
+    fun addCustom(context: Context, city: City): City {
+        val list = customCities(context).filter { it.slug != city.slug } + city
+        saveCustom(context, list)
+        return city
+    }
+
+    fun removeCustom(context: Context, city: City) {
+        val wasSelected = selectedCity(context).slug == city.slug
+        saveCustom(context, customCities(context).filter { it.slug != city.slug })
+        if (wasSelected) setCity(context, CITIES[0])
+    }
+
+    private fun saveCustom(context: Context, list: List<City>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("n", it.name).put("s", it.slug)) }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_CUSTOM, arr.toString()).apply()
+    }
+
+    /**
+     * Looks a place up on kipa.co.il by the name the user typed ("בית שמש" -> /זמני-היום/בית-שמש/).
+     * Returns the place with Kipa's own name for it, or null if Kipa has no page for it.
+     * Must be called off the main thread.
+     */
+    fun lookup(input: String): City? {
+        val slug = input.trim().replace(Regex("[\\s_]+"), "-").trim('-')
+        if (slug.isEmpty()) return null
+        var url = URL(customCity(slug, slug).pageUrl)
+        repeat(3) {
+            val conn = open(url)
+            try {
+                when (conn.responseCode) {
+                    in 200..299 -> {
+                        val html = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        parse(html) // throws if there are no times on the page
+                        val finalSlug = slugFromPath(url.toURI().path) ?: return null
+                        val name = Regex("<h1>\\s*זמני היום ב(.+?)\\s*</h1>").find(html)?.groupValues?.get(1)
+                            ?.let { clean(it) }?.ifEmpty { null } ?: input.trim()
+                        return customCity(name, finalSlug)
+                    }
+                    301, 302, 307, 308 -> {
+                        val loc = conn.getHeaderField("Location") ?: return null
+                        val next = URL(url, loc)
+                        // Kipa sends unknown places to the general page; only follow redirects to another place page.
+                        if (slugFromPath(next.toURI().path) == null) return null
+                        url = next
+                    }
+                    else -> return null
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return null
+    }
+
+    private fun slugFromPath(path: String?): String? =
+        path?.let { Regex("^/זמני-היום/([^/]+)/?$").find(it)?.groupValues?.get(1) }
+
+    private fun open(url: URL): HttpURLConnection {
+        val conn = url.openConnection() as HttpURLConnection
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = 8000
+        conn.readTimeout = 10000
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0")
+        return conn
     }
 
     fun setCity(context: Context, city: City) {
@@ -81,10 +170,8 @@ object ZmanimRepository {
     }
 
     private fun fetch(city: City): Pair<String, List<Zman>> {
-        val conn = URL(city.pageUrl).openConnection() as HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 10000
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0")
+        // No redirects: an unknown place redirects to Kipa's general page, which isn't this place's times.
+        val conn = open(URL(city.pageUrl))
         try {
             if (conn.responseCode !in 200..299) throw IOException("HTTP ${conn.responseCode}")
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
