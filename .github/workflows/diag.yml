@@ -1,0 +1,18 @@
+name: diag
+on:
+  push:
+    branches: [diag]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          U='https://www.yeshiva.org.il/api/times/AllDailyTimes?place=156'
+          for ua in "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0" "Dalvik/2.1.0 (Linux; U; Android 14; 23078PND5G Build/UKQ1)" "Mozilla/5.0 (Linux; Android 14; 23078PND5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"; do
+            code=$(curl -s -o body.txt -w '%{http_code} %{content_type}' -A "$ua" -H 'Accept: application/json' "$U")
+            echo "UA=[$ua] -> $code ; $(head -c 150 body.txt | tr '\n' ' ')"
+          done
+          echo "--- with referer"
+          curl -s -o body.txt -w '%{http_code}\n' -A "Mozilla/5.0 (Linux; Android) LevPrayersWidget/1.0" -e 'https://www.yeshiva.org.il/calendar/timesday/' "$U"; head -c 150 body.txt; echo
+          echo "--- no headers"
+          curl -s -o body.txt -w '%{http_code}\n' -A "" "$U"; head -c 150 body.txt
