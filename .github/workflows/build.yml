@@ -28,17 +28,23 @@ jobs:
       - name: Signing key (from repository secrets)
         env:
           KS_B64: ${{ secrets.LEV_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.LEV_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KS_B64" ]; then
             echo "::error::Missing secret LEV_KEYSTORE_BASE64 (Settings > Secrets and variables > Actions)"
             exit 1
           fi
-          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/lev.keystore"
+          # Tolerate stray spaces/newlines from copy-paste.
+          echo "$KS_B64" | tr -d ' \r\n\t' | base64 -d > "$RUNNER_TEMP/lev.keystore"
           echo "LEV_KEYSTORE_PATH=$RUNNER_TEMP/lev.keystore" >> "$GITHUB_ENV"
+          # Diagnostics only (no secret values): size + short hash of the key file, password length.
+          echo "keystore bytes: $(wc -c < "$RUNNER_TEMP/lev.keystore"), sha256: $(sha256sum "$RUNNER_TEMP/lev.keystore" | cut -c1-12)"
+          P=$(printf '%s' "$KS_PASS" | tr -d ' \r\n\t')
+          echo "::add-mask::$P"
+          echo "password length: ${#P}"
+          echo "LEV_KEYSTORE_PASSWORD=$P" >> "$GITHUB_ENV"
 
       - name: Build
-        env:
-          LEV_KEYSTORE_PASSWORD: ${{ secrets.LEV_KEYSTORE_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
